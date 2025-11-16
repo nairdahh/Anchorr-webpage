@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { getConfig, setConfig, prepareDatabase } from "./db.js";
+import { getConfig, setConfig, prepareDatabase, db } from "./db.js";
 import {
   Client,
   GatewayIntentBits,
@@ -11,20 +11,31 @@ import {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
-  MessageFlags,
+  StringSelectMenuBuilder,
+  StringSelectMenuOptionBuilder,
 } from "discord.js";
 import express from "express";
 import session from "express-session";
+import FileStore from "session-file-store";
 import passport from "passport";
 import { Strategy as DiscordStrategy } from "passport-discord";
 import path from "path";
 import { fileURLToPath } from "url";
 import axios from "axios";
 import bodyParser from "body-parser";
+import fs from "fs";
+import { handleJellyfinWebhook } from "./jellyfinWebhook.js";
 
 // --- INITIAL SETUP ---
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Ensure data directory exists
+const dataDir = path.join(__dirname, "data");
+if (!fs.existsSync(dataDir)) {
+  fs.mkdirSync(dataDir, { recursive: true });
+}
+
 prepareDatabase();
 
 // --- ENV VARIABLES ---
@@ -44,12 +55,28 @@ const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
 // --- EXPRESS WEB SERVER ---
 const app = express();
+app.set('trust proxy', 1); // Trust reverse proxy headers
 app.use(bodyParser.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, "web")));
 
+const Store = FileStore(session);
 app.use(
-  session({ secret: SESSION_SECRET, resave: false, saveUninitialized: false })
+  session({
+    store: new Store({
+      dir: path.join(__dirname, "data", "sessions"),
+      ttl: 7 * 24 * 60 * 60, // 7 days in seconds
+    }),
+    secret: SESSION_SECRET,
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+      secure: true, // Set to true if using HTTPS
+      sameSite: 'lax',
+      httpOnly: true,
+    },
+  })
 );
 app.use(passport.initialize());
 app.use(passport.session());
@@ -64,7 +91,7 @@ passport.use(
       scope: ["identify", "guilds"],
       passReqToCallback: true,
     },
-    (req, accessToken, refreshToken, profile, done) => {      
+    (req, accessToken, refreshToken, profile, done) => {
       return done(null, profile);
     }
   )
@@ -112,7 +139,9 @@ app.get(
       req.session.guildId_to_redirect = guildId; // Store it temporarily
       delete req.session.guildId;
       req.session.save(() => {
-        res.redirect(`/dashboard.html?guild_id=${req.session.guildId_to_redirect}`);
+        res.redirect(
+          `/dashboard.html?guild_id=${req.session.guildId_to_redirect}`
+        );
       });
     } else {
       // Otherwise, just go to the generic dashboard
@@ -176,19 +205,23 @@ app.post("/api/config", ensureAuthenticated, (req, res) => {
 
 // API endpoint to get session info and manageable guilds
 app.get("/api/session", ensureAuthenticated, (req, res) => {
-  const manageableGuilds = req.user.guilds.filter(g => 
-    new PermissionsBitField(BigInt(g.permissions)).has("Administrator")
-  ).map(g => ({
-    id: g.id,
-    name: g.name,
-    icon_url: g.icon ? `https://cdn.discordapp.com/icons/${g.id}/${g.icon}.png` : 'https://cdn.discordapp.com/embed/avatars/0.png',
-    bot_in_server: client.guilds.cache.has(g.id)
-  }));
+  const manageableGuilds = req.user.guilds
+    .filter((g) =>
+      new PermissionsBitField(BigInt(g.permissions)).has("Administrator")
+    )
+    .map((g) => ({
+      id: g.id,
+      name: g.name,
+      icon_url: g.icon
+        ? `https://cdn.discordapp.com/icons/${g.id}/${g.icon}.png`
+        : "https://cdn.discordapp.com/embed/avatars/0.png",
+      bot_in_server: client.guilds.cache.has(g.id),
+    }));
 
   res.json({
     user: req.user,
     guilds: manageableGuilds,
-    bot_id: BOT_ID
+    bot_id: BOT_ID,
   });
 });
 
@@ -201,29 +234,34 @@ app.post("/api/test-connection", ensureAuthenticated, async (req, res) => {
   }
 
   try {
-    if (type === 'jellyseerr') {
+    if (type === "jellyseerr") {
       if (!apiKey) {
-        return res.status(400).json({ message: "API Key is required for Jellyseerr." });
+        return res
+          .status(400)
+          .json({ message: "API Key is required for Jellyseerr." });
       }
       // Test Jellyseerr by fetching its status
-      const authTestUrl = new URL('/api/v1/settings/main', url).href;
+      const authTestUrl = new URL("/api/v1/settings/main", url).href;
       await axios.get(authTestUrl, {
         headers: { "X-Api-Key": apiKey },
         timeout: 5000,
       });
 
       // If the auth test passes, get the public status to find the version
-      const statusUrl = new URL('/api/v1/status', url).href;
+      const statusUrl = new URL("/api/v1/status", url).href;
       const statusResponse = await axios.get(statusUrl, { timeout: 5000 });
       const version = statusResponse.data?.version;
 
-      const message = version ? `Successfully connected to Jellyseerr v${version}!` : "Successfully connected to Jellyseerr!";
+      const message = version
+        ? `Successfully connected to Jellyseerr v${version}!`
+        : "Successfully connected to Jellyseerr!";
       return res.json({ message });
-
-      throw new Error("Invalid response from Jellyseerr.");
-    } else if (type === 'jellyfin') {
+    } else if (type === "jellyfin") {
       // Test Jellyfin by fetching its system info
-      const response = await axios.get(`${url.replace(/\/$/, "")}/System/Info/Public`, { timeout: 5000 });
+      const response = await axios.get(
+        `${url.replace(/\/$/, "")}/System/Info/Public`,
+        { timeout: 5000 }
+      );
       const version = response.data?.Version;
       if (version) {
         return res.json({ message: `Connected to Jellyfin v${version}` });
@@ -232,7 +270,10 @@ app.post("/api/test-connection", ensureAuthenticated, async (req, res) => {
     }
     return res.status(400).json({ message: "Invalid connection type." });
   } catch (error) {
-    const errorMessage = error.response?.data?.message || error.message || "Could not connect. Check URL and CORS settings.";
+    const errorMessage =
+      error.response?.data?.message ||
+      error.message ||
+      "Could not connect. Check URL and CORS settings.";
     return res.status(500).json({ message: errorMessage });
   }
 });
@@ -251,20 +292,41 @@ const tmdbGetDetails = async (id, mediaType) => {
     {
       params: {
         api_key: TMDB_API_KEY,
-        append_to_response: "external_ids,images",
+        append_to_response: "images,credits",
       },
     }
   );
   return data;
 };
-const sendRequestToJellyseerr = async (tmdbId, mediaType, config) => {
+
+const tmdbGetExternalImdb = async (id, mediaType) => {
+  const url =
+    mediaType === "movie"
+      ? `https://api.themoviedb.org/3/movie/${id}/external_ids`
+      : `https://api.themoviedb.org/3/tv/${id}/external_ids`;
+  const res = await axios.get(url, { params: { api_key: TMDB_API_KEY } });
+  return res.data.imdb_id || null;
+};
+const sendRequestToJellyseerr = async (
+  tmdbId,
+  mediaType,
+  config,
+  seasons = []
+) => {
   const payload = { mediaId: parseInt(tmdbId, 10), mediaType };
-  if (mediaType === "tv") payload.seasons = "all";
-  await axios.post(
-    `${config.jellyseer_url.replace(/\/$/, "")}/request`,
-    payload,
-    { headers: { "X-Api-Key": config.jellyseer_api_key } }
-  );
+  if (mediaType === "tv") {
+    if (seasons.length > 0) {
+      payload.seasons = seasons;
+    } else {
+      payload.seasons = "all";
+    }
+  }
+  const baseUrl = config.jellyseer_url
+    .replace(/\/$/, "")
+    .replace(/\/api\/v1$/, "");
+  await axios.post(`${baseUrl}/api/v1/request`, payload, {
+    headers: { "X-Api-Key": config.jellyseer_api_key },
+  });
 };
 const fetchOMDbData = async (imdbId) => {
   if (!imdbId || !OMDB_API_KEY) return null;
@@ -331,20 +393,42 @@ const buildMediaEmbed = (
     .setImage(
       backdropPath ? `https://image.tmdb.org/t/p/w780${backdropPath}` : null
     );
-  const headerLine =
-    mediaType === "movie" && omdbData?.Director && omdbData.Director !== "N/A"
-      ? `Directed by ${omdbData.Director}`
-      : "Summary";
+
+  let headerLine = "Summary";
+  if (
+    mediaType === "movie" &&
+    omdbData?.Director &&
+    omdbData.Director !== "N/A"
+  ) {
+    headerLine = `Directed by ${omdbData.Director}`;
+  } else if (mediaType === "tv" && details.credits?.crew) {
+    const creator = details.credits.crew.find(
+      (c) => c.job === "Creator" || c.job === "Executive Producer"
+    );
+    if (creator) {
+      headerLine = `Created by ${creator.name}`;
+    }
+  }
   embed.addFields({
     name: headerLine,
     value:
       overview.length > 1024 ? overview.substring(0, 1021) + "..." : overview,
   });
   const genres = details.genres?.map((g) => g.name).join(", ") || "N/A";
-  const runtime =
-    mediaType === "movie"
-      ? minutesToHhMm(details.runtime)
-      : `${details.number_of_seasons} seasons`;
+
+  let runtime = "N/A";
+  if (mediaType === "movie") {
+    runtime = minutesToHhMm(details.runtime);
+  } else if (mediaType === "tv") {
+    // For TV shows, get episode duration from OMDb
+    if (omdbData?.Runtime && omdbData.Runtime !== "N/A") {
+      const match = String(omdbData.Runtime).match(/(\d+)/);
+      if (match) {
+        runtime = `${match[1]} min`;
+      }
+    }
+  }
+
   const rating =
     omdbData?.imdbRating && omdbData.imdbRating !== "N/A"
       ? `${omdbData.imdbRating}/10`
@@ -356,10 +440,18 @@ const buildMediaEmbed = (
   );
   return embed;
 };
-const buildActionButtons = (tmdbId, mediaType, imdbId, requested = false) => {
-  const row = new ActionRowBuilder();
+const buildActionButtons = (
+  tmdbId,
+  mediaType,
+  imdbId,
+  requested = false,
+  details = null,
+  requestedSeasons = []
+) => {
+  const buttons = [];
+
   if (imdbId) {
-    row.addComponents(
+    buttons.push(
       new ButtonBuilder()
         .setLabel("Letterboxd")
         .setStyle(ButtonStyle.Link)
@@ -370,23 +462,94 @@ const buildActionButtons = (tmdbId, mediaType, imdbId, requested = false) => {
         .setURL(`https://www.imdb.com/title/${imdbId}`)
     );
   }
-  if (requested) {
-    row.addComponents(
+
+  const rows = [];
+
+  // For TV shows in search mode, show season selection dropdown
+  if (
+    mediaType === "tv" &&
+    details?.seasons?.length > 0 &&
+    requestedSeasons.length === 0 &&
+    !requested
+  ) {
+    const seasonOptions = details.seasons
+      .filter((s) => s.season_number > 0)
+      .slice(0, 24) // Max 24 + 1 for "All Seasons" = 25 total
+      .map((s) => {
+        const episodeCount = s.episode_count || 0;
+        return new StringSelectMenuOptionBuilder()
+          .setLabel(`Season ${s.season_number}`)
+          .setValue(`${s.season_number}`)
+          .setDescription(
+            `${episodeCount} episode${episodeCount !== 1 ? "s" : ""}`
+          );
+      });
+
+    // Add "Request All Seasons" as first option
+    const allSeasonsOption = new StringSelectMenuOptionBuilder()
+      .setLabel("Request All Seasons")
+      .setValue("all");
+
+    if (seasonOptions.length > 0) {
+      // Add dropdown menu (buttons will be added at the end)
+      const selectMenu = new StringSelectMenuBuilder()
+        .setCustomId(`seasonselect|${tmdbId}`)
+        .setPlaceholder("Select season(s) to request")
+        .setMinValues(1)
+        .setMaxValues(Math.min(seasonOptions.length + 1, 25))
+        .addOptions([allSeasonsOption, ...seasonOptions]);
+
+      rows.push(new ActionRowBuilder().addComponents(selectMenu));
+    }
+  }
+
+  // Add action buttons based on state
+  if (requestedSeasons.length > 0) {
+    // Seasons were requested - show which ones
+    let seasonLabel;
+    if (requestedSeasons.includes("all")) {
+      seasonLabel = "All Seasons";
+    } else if (requestedSeasons.length === 1) {
+      seasonLabel = `Season ${requestedSeasons[0]}`;
+    } else {
+      const lastSeason = requestedSeasons.pop();
+      seasonLabel = `Seasons ${requestedSeasons.join(", ")} and ${lastSeason}`;
+    }
+    buttons.push(
       new ButtonBuilder()
         .setCustomId("requested")
-        .setLabel("Requested")
+        .setLabel(`Requested ${seasonLabel}`)
         .setStyle(ButtonStyle.Success)
         .setDisabled(true)
     );
+  } else if (requested) {
+    // Simple requested state (movies or TV shows from /request command)
+    buttons.push(
+      new ButtonBuilder()
+        .setCustomId("requested")
+        .setLabel("Requested, stay tuned!")
+        .setStyle(ButtonStyle.Success)
+        .setDisabled(true)
+    );
+  } else if (mediaType === "tv" && details?.seasons?.length > 0) {
+    // TV show in search mode - dropdown is already added above, no request button needed
   } else {
-    row.addComponents(
+    // Default request button (for movies or TV shows without seasons data)
+    buttons.push(
       new ButtonBuilder()
         .setCustomId(`request|${tmdbId}|${mediaType}`)
         .setLabel("Request")
         .setStyle(ButtonStyle.Primary)
     );
   }
-  return [row];
+
+  // Add buttons row at the beginning (for external links and action buttons)
+  if (buttons.length > 0) {
+    const mainRow = new ActionRowBuilder().addComponents(buttons);
+    rows.unshift(mainRow);
+  }
+
+  return rows;
 };
 
 // --- DISCORD COMMANDS DEFINITION ---
@@ -417,12 +580,19 @@ const commands = [
 ];
 
 // --- DISCORD EVENTS ---
-const handleInteraction = async (interaction, tmdbId, mediaType, isRequest) => {
+const handleInteraction = async (
+  interaction,
+  tmdbId,
+  mediaType,
+  isRequest,
+  seasons = []
+) => {
   const config = getConfig(interaction.guildId);
   try {
-    if (isRequest) await sendRequestToJellyseerr(tmdbId, mediaType, config);
+    if (isRequest)
+      await sendRequestToJellyseerr(tmdbId, mediaType, config, seasons);
     const details = await tmdbGetDetails(tmdbId, mediaType);
-    const imdbId = details.external_ids?.imdb_id;
+    const imdbId = await tmdbGetExternalImdb(tmdbId, mediaType);
     const omdbData = await fetchOMDbData(imdbId);
     const bestBackdropPath = findBestBackdrop(details);
     const embed = buildMediaEmbed(
@@ -433,7 +603,14 @@ const handleInteraction = async (interaction, tmdbId, mediaType, isRequest) => {
       omdbData,
       bestBackdropPath
     );
-    const components = buildActionButtons(tmdbId, mediaType, imdbId, isRequest);
+    const components = buildActionButtons(
+      tmdbId,
+      mediaType,
+      imdbId,
+      isRequest,
+      details,
+      seasons
+    );
     await interaction.editReply({ embeds: [embed], components });
   } catch (error) {
     console.error(
@@ -458,16 +635,43 @@ client.on("interactionCreate", async (interaction) => {
       const focusedValue = interaction.options.getFocused();
       if (focusedValue.length < 2) return await interaction.respond([]);
       const results = await tmdbSearch(focusedValue);
-      const choices = results
-        .filter((r) => ["movie", "tv"].includes(r.media_type) && r.poster_path)
-        .slice(0, 10)
-        .map((item) => {
-          const year = (item.release_date || item.first_air_date)?.slice(0, 4);
-          const label = `${item.media_type === "movie" ? "🎬" : "📺"} ${
-            item.title || item.name
-          }${year ? ` (${year})` : ""}`;
-          return { name: label, value: `${item.id}|${item.media_type}` };
-        });
+      const choices = await Promise.all(
+        results
+          .filter(
+            (r) => ["movie", "tv"].includes(r.media_type) && r.poster_path
+          )
+          .slice(0, 10)
+          .map(async (item) => {
+            const year = (item.release_date || item.first_air_date)?.slice(
+              0,
+              4
+            );
+            let creatorInfo = "";
+            try {
+              const details = await tmdbGetDetails(item.id, item.media_type);
+              if (item.media_type === "movie" && details.credits?.crew) {
+                const director = details.credits.crew.find(
+                  (c) => c.job === "Director"
+                );
+                if (director) creatorInfo = ` — Directed by ${director.name}`;
+              } else if (item.media_type === "tv" && details.credits?.crew) {
+                const creator = details.credits.crew.find(
+                  (c) => c.job === "Creator" || c.job === "Executive Producer"
+                );
+                if (creator) creatorInfo = ` — Created by ${creator.name}`;
+              }
+            } catch (e) {
+              // Ignore errors in autocomplete
+            }
+            const label = `${item.media_type === "movie" ? "🎬" : "📺"} ${
+              item.title || item.name
+            }${year ? ` (${year})` : ""}${creatorInfo}`;
+            return {
+              name: label.substring(0, 100),
+              value: `${item.id}|${item.media_type}`,
+            };
+          })
+      );
       await interaction.respond(choices);
       return;
     }
@@ -483,34 +687,66 @@ client.on("interactionCreate", async (interaction) => {
         ) {
           return interaction.reply({
             content: "Only administrators can use this command.",
-            ephemeral: true,
+            flags: 64,
           });
         }
         const dashboardUrl = `${PUBLIC_BOT_URL}/auth/discord?guild_id=${interaction.guildId}`;
-        const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setLabel('Configure Bot').setStyle(ButtonStyle.Link).setURL(dashboardUrl));        return interaction.reply({
-          content: `Click the button below to configure Anchorr for this server.\n[Configure Bot](${dashboardUrl})`,
-          ephemeral: true,
+
+        const setupEmbed = new EmbedBuilder()
+          .setColor("#cba6f7")
+          .setTitle("Configure Anchorr")
+          .setDescription(
+            "Hey! Welcome to Anchorr setup! Click the button below to configure the bot for this server.\n\n" +
+              "**You'll be able to configure:**\n" +
+              "• Jellyseerr connection\n" +
+              "• Jellyfin notifications\n" +
+              "• Custom embed colors\n" +
+              "• Notification channel"
+          )
+          .setFooter({
+            text: "You must be logged in with Discord to access the dashboard",
+          });
+
+        const row = new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setLabel("🔗 Open Dashboard")
+            .setStyle(ButtonStyle.Link)
+            .setURL(dashboardUrl)
+        );
+
+        return interaction.reply({
+          embeds: [setupEmbed],
+          components: [row],
+          flags: 64,
         });
       }
       if (!config?.jellyseer_url) {
         return interaction.reply({
           content:
             "⚠️ Anchorr is not configured. An admin needs to run `/setup`.",
-          ephemeral: true,
+          flags: 64,
         });
       }
-      await interaction.deferReply({ ephemeral: !!config.ephemeral_responses });
+      await interaction.deferReply({
+        flags: config.ephemeral_responses ? 64 : 0,
+      });
       const rawValue = interaction.options.getString("title");
       const [tmdbId, mediaType] = rawValue.split("|");
       if (!tmdbId || !mediaType)
         return interaction.editReply({
           content: "⚠️ Please select a valid title from the list.",
         });
+
+      // For /request command, always request all seasons for TV shows
+      const seasonsToRequest =
+        commandName === "request" && mediaType === "tv" ? "all" : [];
+
       await handleInteraction(
         interaction,
         tmdbId,
         mediaType,
-        commandName === "request"
+        commandName === "request",
+        seasonsToRequest
       );
     }
 
@@ -521,182 +757,74 @@ client.on("interactionCreate", async (interaction) => {
         await handleInteraction(interaction, tmdbId, mediaType, true);
       }
     }
+
+    if (interaction.isStringSelectMenu()) {
+      if (interaction.customId.startsWith("seasonselect|")) {
+        await interaction.deferUpdate();
+        const [_, tmdbId] = interaction.customId.split("|");
+        const selectedValues = interaction.values;
+
+        // Check if "all" was selected
+        if (selectedValues.includes("all")) {
+          await handleInteraction(interaction, tmdbId, "tv", true, "all");
+        } else {
+          const selectedSeasons = selectedValues.map((v) => parseInt(v));
+          await handleInteraction(
+            interaction,
+            tmdbId,
+            "tv",
+            true,
+            selectedSeasons
+          );
+        }
+      }
+    }
   } catch (error) {
     console.error("An unhandled error occurred in interactionCreate:", error);
     if (interaction.replied || interaction.deferred) {
       await interaction.followUp({
         content: "There was an error while executing this command!",
-        ephemeral: true,
+        flags: 64,
       });
     } else {
       await interaction.reply({
         content: "There was an error while executing this command!",
-        ephemeral: true,
+        flags: 64,
       });
     }
   }
 });
 
 // --- JELLYFIN WEBHOOK HANDLER ---
-const webhookDebounce = new Map();
 app.post("/jellyfin-webhook/:guildId", async (req, res) => {
-  try {
-    const { guildId } = req.params;
-    const data = req.body;
-    if (data.NotificationType !== "ItemAdded") {
-      return res.status(200).send("OK: Notification type ignored.");
-    }
-    const config = getConfig(guildId);
-    if (
-      !config ||
-      !config.notification_channel_id ||
-      !config.jellyfin_server_url
-    ) {
-      console.warn(
-        `Webhook received for guild ${guildId}, but it's not fully configured for notifications.`
-      );
-      return res
-        .status(404)
-        .send("Error: Guild configuration incomplete for notifications.");
-    }
-    if (data.ItemType !== "Movie" && data.ItemType !== "Episode") {
-      return res.status(200).send("OK: ItemType ignored.");
-    }
-
-    const debounceKey = data.SeriesId || data.ItemId;
-    if (webhookDebounce.has(debounceKey)) {
-      clearTimeout(webhookDebounce.get(debounceKey));
-    }
-
-    const timer = setTimeout(async () => {
-      try {
-        const {
-          ItemType,
-          Name,
-          SeriesName,
-          IndexNumber,
-          ParentIndexNumber,
-          Year,
-          Overview,
-          RunTimeTicks,
-          Genres,
-          Provider_imdb: imdbId,
-          ItemId,
-          ServerId,
-          ServerUrl,
-        } = data;
-        let title, authorName;
-        switch (ItemType) {
-          case "Movie":
-            authorName = "🎬 New Movie Added";
-            title = `${Name} (${Year})`;
-            break;
-          case "Episode":
-            authorName = "📺 New Episode Added";
-            title = `${SeriesName} - S${String(ParentIndexNumber).padStart(
-              2,
-              "0"
-            )}E${String(IndexNumber).padStart(2, "0")} - ${Name}`;
-            break;
-        }
-
-        const omdb = await fetchOMDbData(imdbId);
-        const watchUrl = `${ServerUrl.replace(
-          /\/$/,
-          ""
-        )}/web/index.html#!/details?id=${ItemId}&serverId=${ServerId}`;
-
-        const imageUrl = `${ServerUrl.replace(
-          /\/$/,
-          ""
-        )}/Items/${ItemId}/Images/Thumb`;
-
-        const headerLine =
-          ItemType === "Movie" && omdb?.Director && omdb.Director !== "N/A"
-            ? `Directed by ${omdb.Director}`
-            : "Summary";
-
-        const embed = new EmbedBuilder()
-          .setColor(config.color_notification || "#cba6f7")
-          .setAuthor({ name: authorName })
-          .setTitle(title)
-          .setURL(watchUrl)
-          .setImage(imageUrl)
-          .addFields({
-            name: headerLine,
-            value: Overview || omdb?.Plot || "No description available.",
-          })
-          .addFields(
-            {
-              name: "Genre",
-              value: Genres || omdb?.Genre || "N/A",
-              inline: true,
-            },
-            {
-              name: "Runtime",
-              value: minutesToHhMm(Math.round(RunTimeTicks / 10000000 / 60)),
-              inline: true,
-            },
-            {
-              name: "Rating",
-              value: omdb?.imdbRating ? `${omdb.imdbRating}/10` : "N/A",
-              inline: true,
-            }
-          );
-
-        const row = new ActionRowBuilder();
-        if (imdbId) {
-          row.addComponents(
-            new ButtonBuilder()
-              .setLabel("Letterboxd")
-              .setStyle(ButtonStyle.Link)
-              .setURL(`https://letterboxd.com/imdb/${imdbId}`),
-            new ButtonBuilder()
-              .setLabel("IMDb")
-              .setStyle(ButtonStyle.Link)
-              .setURL(`https://www.imdb.com/title/${imdbId}`)
-          );
-        }
-        row.addComponents(
-          new ButtonBuilder()
-            .setLabel("▶ Watch Now")
-            .setStyle(ButtonStyle.Link)
-            .setURL(watchUrl)
-        );
-
-        const channel = await client.channels.fetch(
-          config.notification_channel_id
-        );
-        if (channel) {
-          await channel.send({ embeds: [embed], components: [row] });
-          console.log(`Sent notification for "${title}" to guild ${guildId}`);
-        }
-      } catch (innerError) {
-        console.error("Error processing debounced webhook:", innerError);
-      } finally {
-        webhookDebounce.delete(debounceKey);
-      }
-    }, 10000);
-
-    webhookDebounce.set(debounceKey, timer);
-    res.status(200).send("OK: Notification received and debounced.");
-  } catch (error) {
-    console.error("Error handling Jellyfin webhook:", error);
-    res.status(500).send("Internal Server Error");
-  }
+  await handleJellyfinWebhook(req, res, client, getConfig, TMDB_API_KEY, OMDB_API_KEY);
 });
 
 // --- STARTUP ---
 (async () => {
   try {
+    // Validate required environment variables
+    if (!DISCORD_TOKEN || !BOT_ID) {
+      throw new Error(
+        "Missing required environment variables: DISCORD_TOKEN and BOT_ID"
+      );
+    }
+
     const rest = new REST({ version: "10" }).setToken(DISCORD_TOKEN);
     console.log("Started refreshing application (/) commands.");
-    await rest.put(Routes.applicationCommands(BOT_ID), {
-      body: commands.map((c) => c.toJSON()),
-    });
-    console.log("Successfully reloaded application (/) commands.");
+
+    try {
+      await rest.put(Routes.applicationCommands(BOT_ID), {
+        body: commands.map((c) => c.toJSON()),
+      });
+      console.log("Successfully reloaded application (/) commands.");
+    } catch (restError) {
+      console.warn("Warning: Could not refresh commands:", restError.message);
+      console.warn("Continuing with bot startup...");
+    }
+
     await client.login(DISCORD_TOKEN);
-    client.once("ready", () => {
+    client.once("clientReady", () => {
       console.log(`✅ Discord Bot logged in as ${client.user.tag}`);
       app.listen(WEBHOOK_PORT, () => {
         console.log(
@@ -705,6 +833,7 @@ app.post("/jellyfin-webhook/:guildId", async (req, res) => {
       });
     });
   } catch (error) {
-    console.error("Fatal startup error:", error);
+    console.error("Fatal startup error:", error.message);
+    process.exit(1);
   }
 })();

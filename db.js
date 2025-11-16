@@ -7,7 +7,7 @@ if (!fs.existsSync(dataDir)) {
   fs.mkdirSync(dataDir);
 }
 
-const db = new Database(path.resolve(dataDir, "database.db"));
+export const db = new Database(path.resolve(dataDir, "database.db"));
 
 const MIGRATIONS = [
   `CREATE TABLE configs (
@@ -23,6 +23,12 @@ const MIGRATIONS = [
   `ALTER TABLE configs ADD COLUMN color_success TEXT DEFAULT '#a6d189';`,
   `ALTER TABLE configs ADD COLUMN color_notification TEXT DEFAULT '#cba6f7';`,
   `ALTER TABLE configs RENAME COLUMN embed_color TO color_search;`,
+
+  `CREATE TABLE IF NOT EXISTS sessions (
+      sid TEXT PRIMARY KEY,
+      sess TEXT NOT NULL,
+      expire INTEGER NOT NULL
+    );`,
 ];
 
 export function prepareDatabase() {

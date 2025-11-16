@@ -7,5 +7,9 @@ services:
     # ports:
     #  - "8282:8282"
     volumes:
-      - ./data:/app/data
+      - anchorr-data:/app/data
     stop_grace_period: 1m
+
+volumes:
+  anchorr-data:
+    driver: local
