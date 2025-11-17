@@ -646,28 +646,59 @@ client.on("interactionCreate", async (interaction) => {
               0,
               4
             );
-            let creatorInfo = "";
+            let extraInfo = "";
             try {
               const details = await tmdbGetDetails(item.id, item.media_type);
-              if (item.media_type === "movie" && details.credits?.crew) {
-                const director = details.credits.crew.find(
+              if (item.media_type === "movie") {
+                // Director
+                const director = details.credits?.crew?.find(
                   (c) => c.job === "Director"
                 );
-                if (director) creatorInfo = ` — Directed by ${director.name}`;
-              } else if (item.media_type === "tv" && details.credits?.crew) {
-                const creator = details.credits.crew.find(
-                  (c) => c.job === "Creator" || c.job === "Executive Producer"
-                );
-                if (creator) creatorInfo = ` — Created by ${creator.name}`;
+                const directorName = director ? `directed by ${director.name}` : "";
+                
+                // Runtime
+                let runtimeText = "";
+                if (details.runtime) {
+                  runtimeText = `runtime: ${minutesToHhMm(details.runtime)}`;
+                }
+                
+                // Combine
+                const parts = [directorName, runtimeText].filter(Boolean);
+                if (parts.length > 0) {
+                  extraInfo = ` — ${parts.join(" — ")}`;
+                }
+              } else if (item.media_type === "tv") {
+                // Creator
+                const creator = details.created_by?.[0];
+                const creatorName = creator ? `created by ${creator.name}` : "";
+                
+                // Season count
+                let seasonText = "";
+                if (details.number_of_seasons) {
+                  const s = details.number_of_seasons;
+                  seasonText = `${s} season${s > 1 ? "s" : ""}`;
+                }
+                
+                // Combine
+                const parts = [creatorName, seasonText].filter(Boolean);
+                if (parts.length > 0) {
+                  extraInfo = ` — ${parts.join(" — ")}`;
+                }
               }
             } catch (e) {
               // Ignore errors in autocomplete
             }
-            const label = `${item.media_type === "movie" ? "🎬" : "📺"} ${
+            let label = `${item.media_type === "movie" ? "🎬" : "📺"} ${
               item.title || item.name
-            }${year ? ` (${year})` : ""}${creatorInfo}`;
+            }${year ? ` (${year})` : ""}${extraInfo}`;
+            
+            // Truncate to 95 characters + "..." if too long
+            if (label.length > 100) {
+              label = label.substring(0, 95) + "...";
+            }
+            
             return {
-              name: label.substring(0, 100),
+              name: label,
               value: `${item.id}|${item.media_type}`,
             };
           })
