@@ -8,6 +8,9 @@
 /data
 database.db
 
+# Test artifacts
+/test-data
+/coverage
 
 *.log
 npm-debug.log*
