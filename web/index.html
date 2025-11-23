@@ -20,7 +20,7 @@
     
     <nav class="navbar">
       <div class="container">
-        <a href="#" class="navbar-brand">
+        <a href="#" onclick="switchView('home'); return false;" class="navbar-brand">
           <img src="./assets/logo.png" alt="Anchorr Logo" class="logo-icon" />
           <span class="logo-text">Anchorr</span>
         </a>
@@ -128,20 +128,20 @@
 
           <h2><i class="bi bi-rocket-takeoff text-accent"></i> Quick Start</h2>
           
-          <div class="step-block">
+          <div class="step-block glass-card">
             <h3><i class="bi bi-1-circle text-blue"></i> Clone and Install</h3>
             <pre><code>git clone https://github.com/nairdahh/anchorr.git
 cd anchorr
 npm install</code></pre>
           </div>
 
-          <div class="step-block">
+          <div class="step-block glass-card">
             <h3><i class="bi bi-2-circle text-blue"></i> Start the Application</h3>
             <pre><code>node app.js</code></pre>
             <p>The landing page will be available at <code>http://localhost:8283</code></p>
           </div>
 
-          <div class="step-block">
+          <div class="step-block glass-card">
             <h3><i class="bi bi-3-circle text-blue"></i> Configure Environment</h3>
             <ol>
               <li>Rename <code>.env.example</code> to <code>.env</code></li>
@@ -150,7 +150,7 @@ npm install</code></pre>
             </ol>
           </div>
 
-          <div class="step-block">
+          <div class="step-block glass-card">
             <h3><i class="bi bi-4-circle text-blue"></i> Invite Bot to Discord</h3>
             <p>Generate an OAuth2 URL in <a href="https://discord.com/developers/applications" target="_blank">Discord Developer Portal</a>:</p>
             <ul>
@@ -202,21 +202,13 @@ npm install</code></pre>
             <div class="support-section glass-card">
               <h3>Support the Project</h3>
               <p>If you find Anchorr useful, consider supporting its development. Every coffee helps fuel late-night coding sessions!</p>
-              <a href="https://ko-fi.com/nairdah" target="_blank" class="btn btn-primary"><i class="bi bi-cup-hot"></i> Buy me a Coffee</a>
-            </div>
-
-            <div class="contribute-section">
-              <h3>Contribute</h3>
-              <p>Anchorr is open-source! If you're a developer, your contributions are welcome. Check out the project on GitHub to get started.</p>
-              <a href="https://github.com/nairdahh/Anchorr" target="_blank" class="btn btn-secondary"><i class="bi bi-github"></i> View on GitHub</a>
+              <div class="support-actions" style="display: flex; gap: 1rem; justify-content: center; margin-top: 1.5rem;">
+                <a href="https://ko-fi.com/nairdah" target="_blank" class="btn btn-primary"><i class="bi bi-cup-hot"></i> Buy me a Coffee</a>
+                <a href="https://github.com/nairdahh/Anchorr" target="_blank" class="btn btn-secondary"><i class="bi bi-github"></i> Contribute</a>
+              </div>
             </div>
 
             <div class="credits">
-              <p>Created & Maintained by</p>
-              <div class="maintainer">
-                <img src="https://github.com/nairdahh.png" alt="nairdah" class="maintainer-avatar">
-                <strong>nairdah</strong>
-              </div>
               <p class="thank-you">Thank you for using Anchorr!<br>Please contact me for any matter about the project.</p>
             </div>
           </div>
@@ -238,6 +230,9 @@ npm install</code></pre>
           view.classList.remove('hidden');
           view.classList.add('fade-in');
           window.scrollTo(0, 0);
+          
+          // Ensure URL is clean (no hash)
+          history.replaceState(null, '', window.location.pathname);
         }
       }
     </script>
