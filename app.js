@@ -15,10 +15,7 @@ import {
   StringSelectMenuOptionBuilder,
 } from "discord.js";
 import express from "express";
-import session from "express-session";
-import FileStore from "session-file-store";
-import passport from "passport";
-import { Strategy as DiscordStrategy } from "passport-discord";
+
 import path from "path";
 import { fileURLToPath } from "url";
 import axios from "axios";
@@ -43,8 +40,7 @@ const {
   DISCORD_TOKEN,
   BOT_ID,
   DISCORD_CLIENT_SECRET,
-  PUBLIC_BOT_URL,
-  SESSION_SECRET,
+
   WEBHOOK_PORT,
   TMDB_API_KEY,
   OMDB_API_KEY,
@@ -55,228 +51,18 @@ const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
 // --- EXPRESS WEB SERVER ---
 const app = express();
-app.set('trust proxy', 1); // Trust reverse proxy headers
 app.use(bodyParser.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, "web")));
 
-const Store = FileStore(session);
-app.use(
-  session({
-    store: new Store({
-      dir: path.join(__dirname, "data", "sessions"),
-      ttl: 7 * 24 * 60 * 60, // 7 days in seconds
-    }),
-    secret: SESSION_SECRET,
-    resave: false,
-    saveUninitialized: false,
-    cookie: {
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-      secure: true, // Set to true if using HTTPS
-      sameSite: 'lax',
-      httpOnly: true,
-    },
-  })
-);
-app.use(passport.initialize());
-app.use(passport.session());
-passport.serializeUser((user, done) => done(null, user));
-passport.deserializeUser((obj, done) => done(null, obj));
-passport.use(
-  new DiscordStrategy(
-    {
-      clientID: BOT_ID,
-      clientSecret: DISCORD_CLIENT_SECRET,
-      callbackURL: `${PUBLIC_BOT_URL}/auth/callback`,
-      scope: ["identify", "guilds"],
-      passReqToCallback: true,
-    },
-    (req, accessToken, refreshToken, profile, done) => {
-      return done(null, profile);
-    }
-  )
-);
-function ensureAuthenticated(req, res, next) {
-  // Redirect to login page if not authenticated
-  if (req.isAuthenticated()) return next();
-  res.redirect("/discord-bot.html");
-}
+
 app.get("/", (req, res) =>
   res.sendFile(path.join(__dirname, "web", "index.html"))
 );
-app.get("/discord-bot", (req, res) =>
-  res.sendFile(path.join(__dirname, "web", "discord-bot.html"))
-);
 
-// Generic login route
-app.get("/login", passport.authenticate("discord"));
-
-// Specific login route from Discord /setup command
-app.get("/auth/discord", (req, res, next) => {
-  const guildId = req.query.guild_id;
-  if (!guildId)
-    return res.status(400).send("Error: Missing guild_id parameter.");
-
-  // Check if the bot is actually in the guild before attempting to auth for it.
-  if (!client.guilds.cache.has(guildId)) {
-    const inviteUrl = `https://discord.com/oauth2/authorize?client_id=${BOT_ID}&permissions=3264&scope=bot%20applications.commands&guild_id=${guildId}`;
-    // Redirect the user to invite the bot to that specific server.
-    return res.redirect(inviteUrl);
-  }
-
-  // Store guildId in session to redirect after login
-  req.session.guildId = guildId;
-  passport.authenticate("discord")(req, res, next);
-});
-
-app.get(
-  "/auth/callback",
-  passport.authenticate("discord", { failureRedirect: "/" }),
-  (req, res) => {
-    // If we have a specific guildId from the /setup command, pass it along
-    if (req.session.guildId) {
-      const guildId = req.session.guildId;
-      req.session.guildId_to_redirect = guildId; // Store it temporarily
-      delete req.session.guildId;
-      req.session.save(() => {
-        res.redirect(
-          `/dashboard.html?guild_id=${req.session.guildId_to_redirect}`
-        );
-      });
-    } else {
-      // Otherwise, just go to the generic dashboard
-      req.session.save(() => {
-        res.redirect("/dashboard.html");
-      });
-    }
-  }
-);
-
-app.get("/logout", (req, res) => {
-  req.logout(() => {
-    res.redirect("/discord-bot.html");
-  });
-});
-
-app.get("/dashboard.html", ensureAuthenticated, (req, res) =>
-  res.sendFile(path.join(__dirname, "web", "dashboard.html"))
-);
-
-app.get("/api/config", ensureAuthenticated, (req, res) => {
-  const { guild_id: guildId } = req.query;
-  if (!guildId)
-    return res.status(400).json({ error: "Guild ID is missing from request." });
-  const guild = req.user.guilds.find((g) => g.id === guildId);
-  if (
-    !guild ||
-    !new PermissionsBitField(BigInt(guild.permissions)).has("Administrator")
-  ) {
-    return res
-      .status(403)
-      .json({ error: "You are not an administrator of this server." });
-  }
-  const config = getConfig(guildId) || {};
-  res.json({ guildName: guild.name, config });
-});
-app.post("/api/config", ensureAuthenticated, (req, res) => {
-  const { guild_id: guildId } = req.body;
-  if (!guildId)
-    return res.status(400).json({ error: "Guild ID not found in submission." });
-  const guild = req.user.guilds.find((g) => g.id === guildId);
-  if (
-    !guild ||
-    !new PermissionsBitField(BigInt(guild.permissions)).has("Administrator")
-  )
-    return res.status(403).json({ error: "Forbidden" });
-  const newConfig = {
-    guild_id: guildId,
-    jellyseer_url: req.body.jellyseer_url,
-    jellyseer_api_key: req.body.jellyseer_api_key,
-    notification_channel_id: req.body.notification_channel_id,
-    jellyfin_server_url: req.body.jellyfin_server_url,
-    color_search: req.body.color_search,
-    color_success: req.body.color_success,
-    color_notification: req.body.color_notification,
-    ephemeral_responses: req.body.ephemeral_responses ? 1 : 0,
-  };
-  setConfig(newConfig);
-  res.json({ success: true, message: "Configuration saved!" });
-});
-
-// API endpoint to get session info and manageable guilds
-app.get("/api/session", ensureAuthenticated, (req, res) => {
-  const manageableGuilds = req.user.guilds
-    .filter((g) =>
-      new PermissionsBitField(BigInt(g.permissions)).has("Administrator")
-    )
-    .map((g) => ({
-      id: g.id,
-      name: g.name,
-      icon_url: g.icon
-        ? `https://cdn.discordapp.com/icons/${g.id}/${g.icon}.png`
-        : "https://cdn.discordapp.com/embed/avatars/0.png",
-      bot_in_server: client.guilds.cache.has(g.id),
-    }));
-
-  res.json({
-    user: req.user,
-    guilds: manageableGuilds,
-    bot_id: BOT_ID,
-  });
-});
 
 // API endpoint to test service connections
-app.post("/api/test-connection", ensureAuthenticated, async (req, res) => {
-  const { type, url, apiKey } = req.body;
 
-  if (!url) {
-    return res.status(400).json({ message: "URL is required." });
-  }
-
-  try {
-    if (type === "jellyseerr") {
-      if (!apiKey) {
-        return res
-          .status(400)
-          .json({ message: "API Key is required for Jellyseerr." });
-      }
-      // Test Jellyseerr by fetching its status
-      const authTestUrl = new URL("/api/v1/settings/main", url).href;
-      await axios.get(authTestUrl, {
-        headers: { "X-Api-Key": apiKey },
-        timeout: 5000,
-      });
-
-      // If the auth test passes, get the public status to find the version
-      const statusUrl = new URL("/api/v1/status", url).href;
-      const statusResponse = await axios.get(statusUrl, { timeout: 5000 });
-      const version = statusResponse.data?.version;
-
-      const message = version
-        ? `Successfully connected to Jellyseerr v${version}!`
-        : "Successfully connected to Jellyseerr!";
-      return res.json({ message });
-    } else if (type === "jellyfin") {
-      // Test Jellyfin by fetching its system info
-      const response = await axios.get(
-        `${url.replace(/\/$/, "")}/System/Info/Public`,
-        { timeout: 5000 }
-      );
-      const version = response.data?.Version;
-      if (version) {
-        return res.json({ message: `Connected to Jellyfin v${version}` });
-      }
-      throw new Error("Invalid response from Jellyfin.");
-    }
-    return res.status(400).json({ message: "Invalid connection type." });
-  } catch (error) {
-    const errorMessage =
-      error.response?.data?.message ||
-      error.message ||
-      "Could not connect. Check URL and CORS settings.";
-    return res.status(500).json({ message: errorMessage });
-  }
-});
 
 // --- BOT HELPER FUNCTIONS ---
 const tmdbSearch = async (query) => {
@@ -554,9 +340,7 @@ const buildActionButtons = (
 
 // --- DISCORD COMMANDS DEFINITION ---
 const commands = [
-  new SlashCommandBuilder()
-    .setName("setup")
-    .setDescription("Get a link to configure the bot on the web dashboard."),
+
   new SlashCommandBuilder()
     .setName("search")
     .setDescription("Search for a movie or TV show.")
@@ -710,47 +494,7 @@ client.on("interactionCreate", async (interaction) => {
     if (interaction.isCommand()) {
       const { commandName } = interaction;
       const config = getConfig(interaction.guildId);
-      if (commandName === "setup") {
-        if (
-          !interaction.member.permissions.has(
-            PermissionsBitField.Flags.Administrator
-          )
-        ) {
-          return interaction.reply({
-            content: "Only administrators can use this command.",
-            flags: 64,
-          });
-        }
-        const dashboardUrl = `${PUBLIC_BOT_URL}/auth/discord?guild_id=${interaction.guildId}`;
 
-        const setupEmbed = new EmbedBuilder()
-          .setColor("#cba6f7")
-          .setTitle("Configure Anchorr")
-          .setDescription(
-            "Hey! Welcome to Anchorr setup! Click the button below to configure the bot for this server.\n\n" +
-              "**You'll be able to configure:**\n" +
-              "• Jellyseerr connection\n" +
-              "• Jellyfin notifications\n" +
-              "• Custom embed colors\n" +
-              "• Notification channel"
-          )
-          .setFooter({
-            text: "You must be logged in with Discord to access the dashboard",
-          });
-
-        const row = new ActionRowBuilder().addComponents(
-          new ButtonBuilder()
-            .setLabel("🔗 Open Dashboard")
-            .setStyle(ButtonStyle.Link)
-            .setURL(dashboardUrl)
-        );
-
-        return interaction.reply({
-          embeds: [setupEmbed],
-          components: [row],
-          flags: 64,
-        });
-      }
       if (!config?.jellyseer_url) {
         return interaction.reply({
           content:
@@ -833,12 +577,20 @@ app.post("/jellyfin-webhook/:guildId", async (req, res) => {
 
 // --- STARTUP ---
 (async () => {
+  // Start Web Server immediately
+  app.listen(WEBHOOK_PORT || 8283, () => {
+    console.log(
+      `🌐 Web server started on port ${WEBHOOK_PORT || 8283}`
+    );
+  });
+
   try {
-    // Validate required environment variables
+    // Validate required environment variables for Bot
     if (!DISCORD_TOKEN || !BOT_ID) {
-      throw new Error(
-        "Missing required environment variables: DISCORD_TOKEN and BOT_ID"
+      console.warn(
+        "⚠️ Missing DISCORD_TOKEN or BOT_ID. Bot functionality will be disabled, but the web server is running."
       );
+      return;
     }
 
     const rest = new REST({ version: "10" }).setToken(DISCORD_TOKEN);
@@ -857,14 +609,9 @@ app.post("/jellyfin-webhook/:guildId", async (req, res) => {
     await client.login(DISCORD_TOKEN);
     client.once("clientReady", () => {
       console.log(`✅ Discord Bot logged in as ${client.user.tag}`);
-      app.listen(WEBHOOK_PORT, () => {
-        console.log(
-          `🌐 Web server and webhook listener started on port ${WEBHOOK_PORT}`
-        );
-      });
     });
   } catch (error) {
-    console.error("Fatal startup error:", error.message);
-    process.exit(1);
+    console.error("Bot startup error:", error.message);
+    // Do not exit process, keep web server running
   }
 })();

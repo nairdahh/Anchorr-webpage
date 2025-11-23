@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dir \"c:\\Users\\neacs\\Documents\\Anchorr-discord-bot\\node_modules\\@melloware\\coloris\\dist\")",
+      "Bash(dir \"c:\\Users\\neacs\\Documents\\Anchorr-discord-bot\\node_modules\\@melloware\\coloris\\dist\\umd\")",
+      "Bash(dir:*)",
+      "Bash(netstat:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
