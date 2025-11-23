@@ -129,21 +129,37 @@
           <h2><i class="bi bi-rocket-takeoff text-accent"></i> Quick Start</h2>
           
           <div class="step-block glass-card">
-            <h3><i class="bi bi-1-circle text-blue"></i> Clone and Install</h3>
+            <h3><i class="bi bi-box-seam text-blue"></i> Docker Deployment (Recommended)</h3>
+            
+            <h4 class="mt-2">Using Docker Compose</h4>
+            <pre><code>docker compose up -d --build</code></pre>
+
+            <h4 class="mt-4">Custom Docker Build</h4>
+            <pre><code>docker build -t anchorr .
+docker run -p 8282:8282 \
+  -e DISCORD_TOKEN=your_token \
+  -e BOT_ID=your_bot_id \
+  -e GUILD_ID=your_guild_id \
+  anchorr</code></pre>
+            
+            <p class="note"><i class="bi bi-info-circle"></i> Note: For Docker, use <code>host.docker.internal</code> to reference services on the host machine.</p>
+            
+            <h4 class="mt-4">Official Image</h4>
+            <p>Or use the official docker image: <code>nairdah/anchorr:latest</code></p>
+          </div>
+
+          <div class="step-block glass-card">
+            <h3><i class="bi bi-1-circle text-blue"></i> Manual Install (Node.js)</h3>
             <pre><code>git clone https://github.com/nairdahh/anchorr.git
 cd anchorr
-npm install</code></pre>
+npm install
+node app.js</code></pre>
+             <p>The landing page will be available at <code>http://localhost:8283</code></p>
           </div>
 
           <div class="step-block glass-card">
-            <h3><i class="bi bi-2-circle text-blue"></i> Start the Application</h3>
-            <pre><code>node app.js</code></pre>
-            <p>The landing page will be available at <code>http://localhost:8283</code></p>
-          </div>
-
-          <div class="step-block glass-card">
-            <h3><i class="bi bi-3-circle text-blue"></i> Configure Environment</h3>
-            <ol>
+            <h3><i class="bi bi-2-circle text-blue"></i> Configure Environment</h3>
+            <ol class="aligned-list">
               <li>Rename <code>.env.example</code> to <code>.env</code></li>
               <li>Open <code>.env</code> and fill in your Discord Bot credentials, API keys, and service URLs</li>
               <li>Restart the application: <code>node app.js</code></li>
@@ -151,14 +167,18 @@ npm install</code></pre>
           </div>
 
           <div class="step-block glass-card">
-            <h3><i class="bi bi-4-circle text-blue"></i> Invite Bot to Discord</h3>
+            <h3><i class="bi bi-3-circle text-blue"></i> Invite Bot to Discord</h3>
             <p>Generate an OAuth2 URL in <a href="https://discord.com/developers/applications" target="_blank">Discord Developer Portal</a>:</p>
-            <ul>
+            <ul class="aligned-list">
               <li>OAuth2 → URL Generator</li>
               <li>Scopes: <code>bot</code>, <code>applications.commands</code></li>
               <li>Permissions: Send Messages, Embed Links</li>
               <li>Copy generated URL and open in browser</li>
             </ul>
+          </div>
+          
+          <div class="text-center mt-4">
+            <p><a href="https://github.com/nairdahh/Anchorr" target="_blank">For full info and guide visit the GitHub page <i class="bi bi-box-arrow-up-right"></i></a></p>
           </div>
         </div>
       </div>
@@ -169,12 +189,11 @@ npm install</code></pre>
           <button onclick="switchView('home')" class="btn-back"><i class="bi bi-arrow-left"></i> Back to Home</button>
           
           <div class="about-header">
-            <h2>About Anchorr</h2>
-            <p class="lead">Anchorr is a self-hosted, lightweight bridge that connects your Jellyfin media server with Discord.</p>
+            <h2 class="text-accent">About Anchorr</h2>
+            <p class="lead">Anchorr is a self-hosted, lightweight bridge that connects your Jellyfin media server with Discord. It notifies you on a dedicated channel when new media is added to your library, and with Jellyseerr integration, you can search and request movies and shows directly from Discord.</p>
           </div>
 
           <div class="about-content">
-            <p>It notifies you on a dedicated channel when new media is added to your library, and with Jellyseerr integration, you can search and request movies and shows directly from Discord.</p>
             
             <h3>Features</h3>
             <ul class="feature-list">
@@ -199,12 +218,17 @@ npm install</code></pre>
             <h3>Self-hosted, full control.</h3>
             <p>This version of Anchorr is open-source and self-hosted by users, allowing full control over how Anchorr works and what it does. In parallel, I am working on a direct bot implementation for Discord, which is much easier to configure and doesn't require a self-hosted server. You can find the link in the header.</p>
 
-            <div class="support-section glass-card">
-              <h3>Support the Project</h3>
-              <p>If you find Anchorr useful, consider supporting its development. Every coffee helps fuel late-night coding sessions!</p>
-              <div class="support-actions" style="display: flex; gap: 1rem; justify-content: space-between; align-items: center; margin-top: 1.5rem; flex-wrap: wrap;">
-                <a href="https://ko-fi.com/nairdah" target="_blank" class="btn btn-primary"><i class="bi bi-cup-hot"></i> Buy me a Coffee</a>
-                <a href="https://github.com/nairdahh/Anchorr" target="_blank" class="btn btn-secondary"><i class="bi bi-github"></i> Contribute</a>
+            <div class="support-grid">
+              <div class="support-card glass-card">
+                <h3>Support the Project</h3>
+                <p>If you find Anchorr useful, consider supporting its development. Every coffee helps fuel late-night coding sessions!</p>
+                <a href="https://ko-fi.com/nairdah" target="_blank" class="btn btn-secondary"><i class="bi bi-cup-hot-fill"></i> Buy me a Coffee</a>
+              </div>
+              
+              <div class="support-card glass-card">
+                <h3>Contribute</h3>
+                <p>Anchorr is open-source! If you're a developer, your contributions are welcome. Check out the project on GitHub to get started.</p>
+                <a href="https://github.com/nairdahh/Anchorr" target="_blank" class="btn btn-secondary"><i class="bi bi-github"></i> Contribute on GitHub</a>
               </div>
             </div>
 

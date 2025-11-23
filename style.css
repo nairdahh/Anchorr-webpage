@@ -578,3 +578,74 @@ code {
   font-size: 0.9rem;
   opacity: 0.8;
 }
+
+/* Additions for new layout elements */
+
+/* Spacing Utilities */
+.mt-2 { margin-top: 0.5rem; }
+.mt-4 { margin-top: 1.5rem; }
+.text-center { text-align: center; }
+
+/* Aligned List for Steps */
+.aligned-list {
+  padding-left: 1.2rem;
+  margin-top: 0.5rem;
+}
+
+.aligned-list li {
+  margin-bottom: 0.5rem;
+  padding-left: 0.5rem;
+}
+
+/* Docker Note */
+.note {
+  background: rgba(137, 180, 250, 0.1); /* Blue tint */
+  border-left: 3px solid var(--accent-secondary);
+  padding: 1rem;
+  border-radius: 8px;
+  margin-top: 1rem;
+  font-size: 0.9rem;
+  color: var(--ctp-subtext0);
+}
+
+.note code {
+  background: rgba(0,0,0,0.2);
+  padding: 0.2rem 0.4rem;
+  border-radius: 4px;
+}
+
+/* Support Grid */
+.support-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+  margin: 3rem 0;
+}
+
+.support-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  text-align: left;
+  height: 100%;
+}
+
+.support-card h3 {
+  margin-top: 0;
+  font-size: 1.5rem;
+  color: var(--accent-primary);
+}
+
+.support-card .btn {
+  margin-top: auto;
+  justify-content: center;
+}
+
+
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .support-grid {
+    grid-template-columns: 1fr;
+  }
+}
